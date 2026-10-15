@@ -1,0 +1,30 @@
+# Virtual environment
+.venv/
+
+# Output
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+# Secrets (API keys)
+.env
+.env.*
+*.env
+
+# SaaS-side tooling and benchmarks (PII endpoint blueprint, PII benchmark): local only
+internal/

@@ -1,0 +1,13 @@
+# AMD ROCm 10 stack for the RX 7900 XTX (gfx1100).
+# Install FIRST, from AMD's wheel index only (it mirrors torch's full
+# dependency closure, incl. numpy/pillow/sympy/triton builds):
+#
+#   uv pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ -r requirements-rocm.txt
+#
+# Version pins follow AMD's ROCm 10.0.0 install guide exactly.
+--index-url https://stable.repo.amd.com/rocm/whl-next/
+
+rocm[libraries,device-gfx1100]==10.0.0
+torch[device-gfx1100]==2.13.0+rocm10.0.0
+torchvision[device-gfx1100]==0.28.0+rocm10.0.0
+torchaudio==2.11.0.2+rocm10.0.0

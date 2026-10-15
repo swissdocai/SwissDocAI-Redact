@@ -1,0 +1,35 @@
+# The engine, docTR with PyTorch, recognizer training and the tests. Install
+# AFTER requirements-rocm.txt so that the already-installed ROCm torch
+# satisfies docTR's torch requirement and nothing pulls a CUDA torch from PyPI:
+#
+#   uv pip install --index-strategy unsafe-any-match \
+#       --extra-index-url https://stable.repo.amd.com/rocm/whl-next/ \
+#       -r requirements.txt
+#
+# The extra AMD index is a safety net: it is only consulted when a package
+# (or version) does not exist on PyPI, and prevents any accidental CUDA-torch
+# replacement.
+
+# --- Engine (swissdocai/; what the desktop app runs) ---
+Pillow>=12.2.0
+numpy>=2.0
+rapidfuzz>=3.0
+pdfplumber>=0.11        # PDF text layer → exact word boxes (MIT; brings pypdfium2)
+opencv-python>=4.8
+onnxtr>=0.9             # docTR's models through ONNX Runtime (Apache-2.0)
+onnxruntime-directml>=1.20; sys_platform == "win32"   # same module as onnxruntime: never both
+onnxruntime>=1.20; sys_platform != "win32"
+httpx>=0.27
+fastapi>=0.115
+uvicorn>=0.30
+
+# --- docTR with PyTorch, transformers page readers ---
+python-doctr>=1.0       # Apache-2.0
+transformers>=5.5.0
+
+# --- Recognizer training (scripts/) ---
+datasets>=3.4.1,<4.4.0
+onnx>=1.16              # scripts/export_onnx.py
+
+# --- Tests ---
+pytest>=8

@@ -1,0 +1,66 @@
+[project]
+name = "swissdocai"
+version = "0.4.0"
+description = "Automatic redaction of personal data in Swiss documents, on this machine or with Swiss-hosted models"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+# The engine (swissdocai/) as the desktop app and `swissdocai redact` run it: no PyTorch.
+# scripts/ (benchmarks, recognizer training) is not packaged; see the extras.
+dependencies = [
+    "pillow>=10.1",
+    "numpy>=1.24",
+    "rapidfuzz>=3.0",
+    "pdfplumber>=0.11",       # PDF text layer (brings pypdfium2 and pdfminer)
+    "opencv-python>=4.8",     # checkbox detection; the distribution docTR depends on (headless would clash)
+    "onnxtr>=0.9",            # docTR's models through ONNX Runtime
+    # ONNX Runtime: DirectML (any GPU) on Windows, the CPU elsewhere (CoreML cannot build the
+    # recognizer). Both distributions provide the same module: never install them side by side.
+    "onnxruntime-directml>=1.20; sys_platform == 'win32'",
+    "onnxruntime>=1.20; sys_platform != 'win32'",
+    "httpx>=0.27",            # LLM APIs, the SwissDocAI OCR service, model downloads
+    "fastapi>=0.115",         # the desktop app's engine API (swissdocai.app)
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+# docTR with PyTorch: swissdocai redact --ocr doctr, swissdocai analyze, eval_word_layer.py
+doctr = ["python-doctr>=1.0"]
+# transformers page readers: swissdocai redact --reader <model id>, swissdocai analyze --model
+vlm = ["torch>=2.5", "transformers>=5.5"]
+# recognizer training (export_doctr_data.py, train_doctr.py, export_onnx.py)
+train = ["swissdocai[doctr]", "datasets>=3.4.1,<4.4.0", "onnx>=1.16"]
+dev = ["swissdocai[doctr]", "pytest>=8"]
+
+[project.scripts]
+swissdocai = "swissdocai.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["swissdocai"]
+
+[tool.hatch.build.targets.sdist]
+include = ["swissdocai", "README.md", "pyproject.toml"]
+
+# --- Development environment (this repo) -----------------------------------
+# The dev venv is NOT managed through uv's lockfile: the AMD ROCm wheels
+# cannot be resolved that way (AMD's index serves no PEP 658 metadata, so
+# uv reads the Linux torch wheel's metadata and demands a `triton`
+# dependency that Windows builds don't have). Dependencies are installed
+# with `uv pip install` from requirements files (see README "Setup"):
+#
+#   1. requirements-rocm.txt  — AMD's PyTorch, installed with --index-url AMD
+#   2. requirements.txt       — the engine, docTR, training and tests, from PyPI
+#
+# IMPORTANT: never run `uv sync` in this repo — it removes every package not
+# in its resolution, which would remove the whole ROCm stack. Use
+# `uv run --no-sync`. `package = false` keeps uv from installing this
+# project into the dev venv; `uv build` still builds the swissdocai wheel.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

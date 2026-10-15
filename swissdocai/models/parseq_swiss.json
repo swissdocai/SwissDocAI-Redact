@@ -1,0 +1,34 @@
+{
+ "arch": "parseq",
+ "task": "reco",
+ "vocab": "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~°£€¥¢฿àâéèêëîïôùûüçÀÂÉÈÊËÎÏÔÙÛÜÇäöÄÖßẞìíòóúÌÍÒÓÚáÁœŒæÆñÑ’‘“”„«»‹›–—…§±×÷µ²³¹·•½¼¾",
+ "scores": {
+  "ours": {
+   "exact": 0.9942,
+   "caseless": 0.9942,
+   "cer": 0.0011,
+   "umlaut": 0.96,
+   "n": 5000
+  },
+  "umlauts": {
+   "exact": 0.9739,
+   "caseless": 0.9739,
+   "cer": 0.0024,
+   "umlaut": 0.9739,
+   "n": 997
+  },
+  "real": {
+   "exact": 0.9878,
+   "caseless": 0.9908,
+   "cer": 0.0029,
+   "umlaut": 1.0,
+   "n": 5000
+  },
+  "real_scans": {
+   "exact": 0.8686,
+   "caseless": 0.8778,
+   "cer": 0.0515,
+   "n": 5000
+  }
+ }
+}

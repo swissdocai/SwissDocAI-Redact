@@ -297,7 +297,7 @@ def detect_with_llm(client, pages: list[str], categories=DEFAULT_CATEGORIES, max
         try:
             items = json.loads(reply).get("entities", [])
         except json.JSONDecodeError:
-            logger.error("LLM reply is not JSON, skipped: %r", reply[:200])
+            logger.error("LLM reply is not JSON, skipped")
             return 0
         usable = 0
         for item in items:
@@ -306,7 +306,7 @@ def detect_with_llm(client, pages: list[str], categories=DEFAULT_CATEGORIES, max
                 found.setdefault((entity.text.casefold(), entity.category), entity)
                 usable += 1
             elif entity.text:
-                logger.info("dropped implausible %s: %r", entity.category, entity.text[:60])
+                logger.info("dropped an implausible value of category %s", entity.category)
         return usable
 
     for chunk in _chunks(list(enumerate(pages, 1)), max_chars):

@@ -71,6 +71,7 @@ fn start_engine(app: tauri::AppHandle, engine: Arc<Engine>) {
             args.extend(["--parent-pid".into(), std::process::id().to_string()]);
             let mut command = Command::new(&program);
             command.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+            command.env("ORT_DISABLE_TELEMETRY", "1"); // no ONNX Runtime telemetry (swissdocai/__init__.py)
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;

@@ -16,7 +16,10 @@ export function StatusBadge({ doc }: { doc: DocSummary }) {
   const busy = doc.status === 'queued' || doc.status === 'analyzing' || doc.status === 'saving';
   const { stage, done, total } = doc.progress;
   if (busy) {
-    const detail = doc.status !== 'queued' && stage ? `${t(`stage.${stage}`)}${total > 1 ? ` ${done + 1}/${total}` : ''}` : '';
+    // stage "queued": done is the place in the service's queue, total the estimated wait in seconds
+    const detail = doc.status === 'queued' || !stage ? ''
+      : stage === 'queued' ? t('stage.queued', { n: done })
+        : `${t(`stage.${stage}`)}${total > 1 ? ` ${done + 1}/${total}` : ''}`;
     return (
       <span className="flex items-center gap-1.5 text-xs text-brand-700">
         <LoaderCircle className="h-3.5 w-3.5 animate-spin" />

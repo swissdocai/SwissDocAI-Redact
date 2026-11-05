@@ -43,7 +43,8 @@ class Document:
     path: Path
     status: str = "waiting"  # waiting | queued | analyzing | review | saving | saved | failed
     error: str = ""
-    stage: str = ""
+    error_code: str = ""  # a SwissDocAI service's error the window explains (saas.SaasError.code)
+    stage: str = ""  # stage "queued": done is the place in the service's queue, total the estimated wait in seconds
     done: int = 0
     total: int = 0
     job: RedactionJob | None = None
@@ -52,7 +53,8 @@ class Document:
 
     def summary(self) -> dict:
         return {"id": self.id, "name": self.path.name, "path": str(self.path), "status": self.status,
-                "error": self.error, "progress": {"stage": self.stage, "done": self.done, "total": self.total},
+                "error": self.error, "errorCode": self.error_code,
+                "progress": {"stage": self.stage, "done": self.done, "total": self.total},
                 "pages": len(self.job.pages) if self.job else 0, "savedTo": self.saved_to,
                 "verified": (self.report or {}).get("verification", {}).get("ok")}
 
@@ -143,7 +145,7 @@ class Engine:
             docs = [d for d in self.documents.values() if (ids is None or d.id in ids)
                     and d.status in ("waiting", "failed")]
             for doc in docs:
-                doc.status, doc.error = "queued", ""
+                doc.status, doc.error, doc.error_code = "queued", "", ""
                 self.work.put(lambda doc=doc: self._analyze(doc))
 
     def _progress(self, doc: Document):
@@ -157,19 +159,21 @@ class Engine:
             doc.job = self.session.analyze(doc.path, self._progress(doc))
             doc.status, doc.stage = "review", ""
         except Exception as error:  # noqa: BLE001 — shown in the window
-            logger.exception("analysis of %s failed", doc.path)
+            logger.error("analysis of document %s failed: %s", doc.id, type(error).__name__)  # no file name, no text
             doc.status, doc.error = "failed", f"{type(error).__name__}: {error}"
+            doc.error_code = getattr(error, "code", "")
 
     def save(self, doc: Document, out: str) -> None:
-        doc.status = "saving"
+        doc.status, doc.error, doc.error_code = "saving", "", ""
 
         def run():
             try:
                 doc.report = self.session.save(doc.job, out, self._progress(doc))
                 doc.status, doc.saved_to, doc.stage = "saved", out, ""
             except Exception as error:  # noqa: BLE001
-                logger.exception("saving %s failed", doc.path)
+                logger.error("saving document %s failed: %s", doc.id, type(error).__name__)  # no file name, no text
                 doc.status, doc.error = "review", f"{type(error).__name__}: {error}"
+                doc.error_code = getattr(error, "code", "")
         self.work.put(run)
 
     def start_setup(self) -> None:

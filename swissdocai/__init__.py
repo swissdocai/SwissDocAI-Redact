@@ -24,6 +24,13 @@ Modules:
 - ``app``             the desktop app's engine: API, session, token storage
 """
 
+import os
+
+# Before anything can load ONNX Runtime (also through onnxtr): since 1.29 it sends telemetry to
+# Microsoft by default on Linux, starting with the import. Assigned, not setdefault, so that no
+# environment can switch it on again. words.onnxruntime() also switches off the Python API's events.
+os.environ["ORT_DISABLE_TELEMETRY"] = "1"
+
 __version__ = "0.4.0"
 
 from .pipeline import DocumentAnalyzer  # noqa: E402

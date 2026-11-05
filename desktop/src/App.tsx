@@ -94,7 +94,7 @@ export default function App() {
   const [lastZoom, setLastZoom] = useState(1);
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const [dropping, setDropping] = useState(false);
-  const [notice, setNotice] = useState<{ name: string; path: string; ok: boolean | null; count: number } | null>(null);
+  const [notice, setNotice] = useState<{ name: string; path: string; ok: boolean | null; count: number; error?: string } | null>(null);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selected;
 
@@ -184,6 +184,10 @@ export default function App() {
           name: doc.savedTo.split(/[\\/]/).pop() ?? doc.name, path: doc.savedTo,
           ok: report.verification?.ok ?? null, count: report.verification?.stillReadable.length ?? 0,
         }));
+      }
+      if (previous.current[doc.id] === 'saving' && doc.status === 'review' && doc.error) {
+        setNotice({ name: doc.name, path: '', ok: false, count: 0,
+          error: doc.errorCode ? t(`cloudError.${doc.errorCode}`) : doc.error });
       }
       previous.current[doc.id] = doc.status;
     }
@@ -336,11 +340,12 @@ export default function App() {
               <div className={`flex items-center gap-3 border-b px-5 py-2.5 text-sm ${notice.ok === false ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
                 {notice.ok === false ? <TriangleAlert className="h-4 w-4 shrink-0" /> : <CircleCheck className="h-4 w-4 shrink-0" />}
                 <span className="min-w-0 flex-1 truncate">
-                  {notice.ok === null ? t('saved.plain', { name: notice.name })
+                  {notice.error ? t('saved.failed', { name: notice.name, error: notice.error })
+                    : notice.ok === null ? t('saved.plain', { name: notice.name })
                     : notice.ok ? t('saved.verified', { name: notice.name })
                       : t('saved.unverified', { name: notice.name, count: notice.count })}
                 </span>
-                <button className="btn-ghost py-1" onClick={() => showInFolder(notice.path)}><FolderOpen className="h-4 w-4" /> {t('saved.show')}</button>
+                {notice.path && <button className="btn-ghost py-1" onClick={() => showInFolder(notice.path)}><FolderOpen className="h-4 w-4" /> {t('saved.show')}</button>}
                 <button className="icon-btn" onClick={() => setNotice(null)}><X className="h-4 w-4" /></button>
               </div>
             )}
@@ -369,12 +374,17 @@ export default function App() {
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-stone-500">
                   <LoaderCircle className="h-8 w-8 animate-spin text-brand-600" />
                   <StatusBadge doc={current} />
+                  {current.progress.stage === 'queued' && current.progress.total >= 20 && (
+                    <p className="max-w-md text-center text-sm">
+                      {t('queue.busy')} {t('queue.wait', { count: Math.ceil(current.progress.total / 60) })}
+                    </p>
+                  )}
                 </div>
               ) : current.status === 'failed' ? (
                 <div className="flex h-full items-center justify-center p-10">
                   <div className="card max-w-lg p-6">
                     <p className="flex items-center gap-2 text-sm font-semibold text-swiss-600"><CircleAlert className="h-4 w-4" /> {t('viewer.failed')}</p>
-                    <p className="mt-2 break-words text-xs text-stone-500">{current.error}</p>
+                    <p className="mt-2 break-words text-xs text-stone-500">{current.errorCode ? t(`cloudError.${current.errorCode}`) : current.error}</p>
                   </div>
                 </div>
               ) : (

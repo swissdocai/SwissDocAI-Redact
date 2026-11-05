@@ -12,6 +12,9 @@ on:
 permissions:
   contents: write  # the draft release for a tag
 
+env:
+  ORT_DISABLE_TELEMETRY: "1"  # no ONNX Runtime telemetry to Microsoft, also while building
+
 jobs:
   build:
     strategy:

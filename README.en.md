@@ -35,17 +35,18 @@ attachments or comments in which blacked-out data could live on.
 ## Your data stays with you
 
 The app works entirely on your computer. After the one-time setup it needs no internet
-connection, and no document leaves the computer.
+connection, and no document leaves the computer. The telemetry of ONNX Runtime, which runs the
+text recognition, is switched off.
 
-If you like, you can hand single steps to **SwissDocAI Cloud**, processed in Switzerland
+If you like, you can hand steps to **SwissDocAI Cloud**, processed in Switzerland
 ([swissdocai.ch](https://swissdocai.ch)) – for instance when your computer has no suitable
 graphics card. It is an option under "Settings" → "General", off by default:
 
-- **Read the pages:** the page images are read in Switzerland.
-- **Find personal data:** only the text of the pages is checked in Switzerland, no images.
+- **Only finding personal data in the cloud:** the pages are read on your computer. Only their
+  text is checked in Switzerland, no images.
+- **Reading and finding personal data in the cloud:** the document is sent to Switzerland once.
 
-Each service costs one page of credit per document page, both together two. You need an API
-token from the SwissDocAI console.
+Both cost one page of credit per page. You need an API token from the SwissDocAI console.
 
 ## Installation
 

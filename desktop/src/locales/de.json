@@ -31,6 +31,8 @@
     "failed": "Fehlgeschlagen"
   },
   "stage": {
+    "queued": "In der Warteschlange, Platz {{n}}",
+    "pages": "Seiten vorbereiten",
     "words": "Wörter erkennen",
     "reading": "Seiten lesen",
     "personal data": "Personendaten suchen",
@@ -84,10 +86,24 @@
     "other": "Weitere"
   },
   "saved": {
+    "failed": "{{name}} wurde nicht gespeichert: {{error}}",
     "verified": "{{name}} gespeichert. Beim erneuten Lesen ist keiner der geschwärzten Werte lesbar.",
     "unverified": "{{name}} gespeichert, aber beim erneuten Lesen sind noch {{count}} Werte lesbar – bitte prüfen.",
     "plain": "{{name}} gespeichert.",
     "show": "Im Ordner zeigen"
+  },
+  "queue": {
+    "busy": "Entschuldigen Sie, zurzeit erreichen uns viele Anfragen. Es kann etwas länger dauern.",
+    "wait_one": "Geschätzte Wartezeit: etwa {{count}} Minute.",
+    "wait_other": "Geschätzte Wartezeit: etwa {{count}} Minuten."
+  },
+  "cloudError": {
+    "token": "SwissDocAI hat den API-Token abgelehnt. Bitte prüfen Sie ihn in den Einstellungen.",
+    "credit": "Ihr SwissDocAI-Guthaben ist aufgebraucht. Sie können es in der SwissDocAI Console aufladen.",
+    "busy": "SwissDocAI Cloud ist ausgelastet oder kurz nicht erreichbar. Bitte versuchen Sie es in einigen Minuten erneut.",
+    "tooLarge": "Das Dokument ist zu gross für SwissDocAI Cloud: höchstens 50 Seiten. Teilen Sie es auf oder verarbeiten Sie es auf diesem Computer.",
+    "unreadable": "SwissDocAI Cloud konnte die Datei nicht lesen.",
+    "gone": "Das Ergebnis ist nicht mehr verfügbar. Bitte analysieren Sie das Dokument erneut."
   },
   "settings": {
     "title": "Einstellungen",
@@ -112,11 +128,18 @@
     "save": "Speichern",
     "cancel": "Abbrechen",
     "nextDocument": "Gilt ab dem nächsten analysierten Dokument.",
+    "modeTitle": "Wo Ihre Dokumente verarbeitet werden",
+    "modeIntro": "Die Verarbeitung in der Cloud läuft in der Schweiz (swissdocai.ch) und braucht keine starke Grafikkarte.",
+    "modeLocal": "Alles auf diesem Computer",
+    "modeLocalHint": "Dokumente und Text verlassen den Computer nicht.",
+    "modePii": "Nur Personensuche in der Cloud",
+    "modePiiHint": "Die Seiten werden hier gelesen. Nur ihr Text geht in die Cloud, keine Bilder.",
+    "modeCloud": "Lesen und Personensuche in der Cloud",
+    "modeCloudHint": "Das Dokument wird einmal in die Cloud gesendet.",
+    "cloudCostPii": "Personensuche in der Cloud: eine Seite Guthaben pro Seite.",
     "readerTitle": "Seiten lesen",
     "readerLocal": "Auf diesem Computer",
     "readerLocalHint": "GLM-OCR – die Seiten verlassen den Computer nicht.",
-    "readerCloud": "SwissDocAI Cloud",
-    "readerCloudHint": "Die Seiten werden in der Schweiz gelesen (swissdocai.ch). Pro Seite verrechnet.",
     "readerNone": "Aus",
     "readerNoneHint": "Nur die erkannten Wörter – am schnellsten, weniger Zusammenhang.",
     "readerIntro": "Ein Lesemodell schreibt jede Seite ab. In diesem Text werden die Personendaten gesucht; die erkannten Wörter zeigen, wo geschwärzt wird. So prüfen sich zwei Lesungen gegenseitig.",
@@ -126,15 +149,8 @@
     "tokenFromEnv": "Aus der Umgebung (SWISSDOCAI_API_KEY).",
     "tokenHint": "Den Token finden Sie in der SwissDocAI Console unter «API-Tokens».",
     "tokenMissing": "Für SwissDocAI Cloud wird ein API-Token benötigt.",
-    "piiTitle": "Personendaten finden",
-    "piiIntro": "Ein Sprachmodell sucht die Personendaten im Text der Seiten, nach Ihren Listen unter «Was schwärzen».",
-    "piiLocal": "Auf diesem Computer",
-    "piiLocalHint": "Gemma 4 E4B – der Text verlässt den Computer nicht.",
-    "piiCloud": "SwissDocAI Cloud",
-    "piiCloudHint": "Nur der Text der Seiten wird in der Schweiz geprüft (swissdocai.ch), keine Bilder. Pro Seite verrechnet.",
     "cloudTitle": "SwissDocAI Cloud",
-    "cloudCostOne": "Jede Seite eines Dokuments kostet 1 Seite Guthaben.",
-    "cloudCostBoth": "Jede Seite eines Dokuments kostet 2 Seiten Guthaben: eine fürs Lesen, eine für die Personendaten.",
+    "cloudCostBoth": "Lesen und Personensuche in der Cloud: eine Seite Guthaben pro Seite.",
     "titledRule": "Namen nach einem Titel immer schwärzen (Dr., Prof., PD)",
     "titledRuleHint": "Sicherheitsregel: «Dr. med. Muster» ist immer eine Person – auch wenn das Modell sie für einen Teil der Organisation hält.",
     "qrRule": "QR-Codes schwärzen",
@@ -142,7 +158,7 @@
   },
   "setup": {
     "title": "Einmalige Einrichtung",
-    "text": "Damit alles auf diesem Computer läuft, lädt die App ihre Modelle einmal herunter (etwa {{gb}} GB). Danach funktioniert sie offline.",
+    "text": "Damit alles auf diesem Computer läuft, lädt die App ihre Modelle einmal herunter (etwa {{gb}} GB). Danach funktioniert sie offline, ohne Telemetrie.",
     "download": "Herunterladen",
     "later": "Später",
     "resume": "Fortsetzen",

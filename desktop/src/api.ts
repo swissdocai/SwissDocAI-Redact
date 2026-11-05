@@ -9,6 +9,7 @@ export interface DocSummary {
   path: string;
   status: Status;
   error: string;
+  errorCode: string; // a SwissDocAI service's error: locales cloudError.<code>
   progress: { stage: string; done: number; total: number };
   pages: number;
   savedTo: string;

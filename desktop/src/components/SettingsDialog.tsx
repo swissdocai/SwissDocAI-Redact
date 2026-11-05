@@ -1,4 +1,4 @@
-import { Ban, Cloud, Cpu, Info, KeyRound, Plus, RotateCcw, ShieldCheck, X } from 'lucide-react';
+import { Ban, Cloud, Cpu, FileText, Info, KeyRound, Plus, RotateCcw, ShieldCheck, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { call, type Policy, type Settings } from '../api';
@@ -112,20 +112,25 @@ export function SettingsDialog({ settings, onClose, onSave }: Props) {
     setDraft({ ...draft, policy: standard, policyIsDefault: true });
     setPolicyTouched(false);
   };
+  // where a document goes: nowhere, only its text (/v1/pii), or the document once (/v1/redact)
+  const mode = draft.reader === 'swissdocai' ? 'cloud' : draft.engine === 'swissdocai' ? 'pii' : 'local';
+  const setMode = (next: typeof mode) => setDraft({
+    ...draft,
+    engine: next === 'local' ? 'local' : 'swissdocai',
+    reader: next === 'cloud' ? 'swissdocai' : draft.reader === 'swissdocai' ? 'local' : draft.reader,
+  });
   const save = async () => {
     setSaving(true);
     const clean = (items: string[]) => items.map((x) => x.trim()).filter(Boolean);
     const policy = policyTouched
       ? { redact: clean(draft.policy.redact), keep: clean(draft.policy.keep), notes: draft.policy.notes.trim() }
       : draft.policyIsDefault ? null : draft.policy;
-    await onSave({ reader: draft.reader, engine: draft.engine, dpi: draft.dpi, language: draft.language,
+    await onSave({ reader: draft.reader, engine: mode === 'local' ? 'local' : 'swissdocai', dpi: draft.dpi, language: draft.language,
       always_redact_contacts: draft.always_redact_contacts, always_redact_titled_names: draft.always_redact_titled_names,
       redact_qr_codes: draft.redact_qr_codes, policy, ...(token.trim() ? { swissdocai_token: token.trim() } : {}) });
     setSaving(false);
   };
   const isDefault = draft.policyIsDefault && !policyTouched;
-  // pages of SwissDocAI credit per document page: one for reading it, one for finding the personal data
-  const cloudPages = (draft.reader === 'swissdocai' ? 1 : 0) + (draft.engine === 'swissdocai' ? 1 : 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 p-6 backdrop-blur-[2px]">
@@ -207,58 +212,60 @@ export function SettingsDialog({ settings, onClose, onSave }: Props) {
           ) : (
             <div className="space-y-6">
               <section>
-                <h3 className="mb-1 text-sm font-semibold text-stone-900">{t('settings.readerTitle')}</h3>
-                <p className="mb-3 text-xs text-stone-500">{t('settings.readerIntro')}</p>
+                <h3 className="mb-1 text-sm font-semibold text-stone-900">{t('settings.modeTitle')}</h3>
+                <p className="mb-3 text-xs text-stone-500">{t('settings.modeIntro')}</p>
                 <div className="grid grid-cols-3 gap-3">
-                  {([['local', Cpu, 'settings.readerLocal', 'settings.readerLocalHint'],
-                     ['swissdocai', Cloud, 'settings.readerCloud', 'settings.readerCloudHint'],
-                     ['none', Ban, 'settings.readerNone', 'settings.readerNoneHint']] as const).map(([value, Icon, label, hint]) => (
+                  {([['local', Cpu, 'settings.modeLocal', 'settings.modeLocalHint'],
+                     ['pii', FileText, 'settings.modePii', 'settings.modePiiHint'],
+                     ['cloud', Cloud, 'settings.modeCloud', 'settings.modeCloudHint']] as const).map(([value, Icon, label, hint]) => (
                     <button
                       key={value}
-                      onClick={() => setDraft({ ...draft, reader: value })}
+                      onClick={() => setMode(value)}
                       className={`rounded-xl border p-4 text-left transition-colors ${
-                        draft.reader === value ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-500/20' : 'border-stone-200 hover:bg-stone-50'
+                        mode === value ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-500/20' : 'border-stone-200 hover:bg-stone-50'
                       }`}
                     >
-                      <Icon className={`mb-2 h-5 w-5 ${draft.reader === value ? 'text-brand-600' : 'text-stone-400'}`} />
-                      <div className="text-sm font-semibold text-stone-900">{t(label)}</div>
-                      <div className="text-xs text-stone-500">{t(hint)}</div>
-                    </button>
-                  ))}
-                </div>
-                {draft.reader === 'none' && (
-                  <p className="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-4 text-xs leading-relaxed text-stone-600">
-                    {t('settings.readerNoneDetail')}
-                  </p>
-                )}
-              </section>
-              <section>
-                <h3 className="mb-1 text-sm font-semibold text-stone-900">{t('settings.piiTitle')}</h3>
-                <p className="mb-3 text-xs text-stone-500">{t('settings.piiIntro')}</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {([['local', Cpu, 'settings.piiLocal', 'settings.piiLocalHint'],
-                     ['swissdocai', Cloud, 'settings.piiCloud', 'settings.piiCloudHint']] as const).map(([value, Icon, label, hint]) => (
-                    <button
-                      key={value}
-                      onClick={() => setDraft({ ...draft, engine: value })}
-                      className={`rounded-xl border p-4 text-left transition-colors ${
-                        draft.engine === value ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-500/20' : 'border-stone-200 hover:bg-stone-50'
-                      }`}
-                    >
-                      <Icon className={`mb-2 h-5 w-5 ${draft.engine === value ? 'text-brand-600' : 'text-stone-400'}`} />
+                      <Icon className={`mb-2 h-5 w-5 ${mode === value ? 'text-brand-600' : 'text-stone-400'}`} />
                       <div className="text-sm font-semibold text-stone-900">{t(label)}</div>
                       <div className="text-xs text-stone-500">{t(hint)}</div>
                     </button>
                   ))}
                 </div>
               </section>
-              {cloudPages > 0 && (
+              {mode !== 'cloud' && (
+                <section>
+                  <h3 className="mb-1 text-sm font-semibold text-stone-900">{t('settings.readerTitle')}</h3>
+                  <p className="mb-3 text-xs text-stone-500">{t('settings.readerIntro')}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {([['local', Cpu, 'settings.readerLocal', 'settings.readerLocalHint'],
+                       ['none', Ban, 'settings.readerNone', 'settings.readerNoneHint']] as const).map(([value, Icon, label, hint]) => (
+                      <button
+                        key={value}
+                        onClick={() => setDraft({ ...draft, reader: value })}
+                        className={`rounded-xl border p-4 text-left transition-colors ${
+                          draft.reader === value ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-500/20' : 'border-stone-200 hover:bg-stone-50'
+                        }`}
+                      >
+                        <Icon className={`mb-2 h-5 w-5 ${draft.reader === value ? 'text-brand-600' : 'text-stone-400'}`} />
+                        <div className="text-sm font-semibold text-stone-900">{t(label)}</div>
+                        <div className="text-xs text-stone-500">{t(hint)}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {draft.reader === 'none' && (
+                    <p className="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-4 text-xs leading-relaxed text-stone-600">
+                      {t('settings.readerNoneDetail')}
+                    </p>
+                  )}
+                </section>
+              )}
+              {mode !== 'local' && (
                 <section className="rounded-lg border border-stone-200 bg-stone-50 p-4">
                   <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-stone-900">
                     <Cloud className="h-4 w-4 text-brand-600" /> {t('settings.cloudTitle')}
                   </div>
                   <p className="mb-3 text-xs leading-relaxed text-stone-600">
-                    {t(cloudPages === 2 ? 'settings.cloudCostBoth' : 'settings.cloudCostOne')}
+                    {t(mode === 'cloud' ? 'settings.cloudCostBoth' : 'settings.cloudCostPii')}
                   </p>
                   <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-stone-800">
                     <KeyRound className="h-4 w-4 text-stone-400" /> {t('settings.token')}

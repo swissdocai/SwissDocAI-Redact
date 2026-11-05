@@ -4,6 +4,8 @@
     report = redact_document("letter.pdf", "letter.redacted.pdf", client=engine.client(),
                              reader=LocalEngine(READER_MODEL).reader())
 
+0. Pages without a usable text layer that lie sideways or upside down are straightened
+   (``straighten``); everything below works on the straight page, and it is what the output shows.
 1. Word layer per page (hybrid: PDF text layer + OCR where it has no words).
 2. A reader model (optional) transcribes each page: the text the PII step
    reads. Every page word missing from that transcription is added as plain
@@ -27,6 +29,11 @@
 Steps 1–4 are ``analyze_document`` (a ``RedactionJob``), 5–6 ``render_job``; in
 between a reviewer may keep words readable, redact more words or draw boxes
 (the desktop app). ``redact_document`` runs both without review.
+
+With reading and the PII step both at the SwissDocAI service, steps 0–4 happen there in one job
+(``analyze_in_cloud``): the document goes up once and its findings come back as places on the
+page as sent. Turned onto the straight page, they enter the same review as local findings; bars
+and PDF stay on this machine, and the service reads the redacted pages again (``cloud_values``).
 """
 
 import io
@@ -34,20 +41,74 @@ import logging
 import time
 import unicodedata
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
 from .pii import DEFAULT_CATEGORIES, Entity, detect_with_llm, detect_with_rules
-from .saas import new_document_id
+from .saas import (
+    REDACT_MAX_PAGES, SaasError, SaasTooLarge, SwissDocAIPii, SwissDocAIReader, SwissDocAIRedact, new_document_id,
+)
 from .pipeline import DocumentAnalyzer, SourcePage, load_pages
 from .result import PageInput, build_analyze_result
-from .words import PageWords, Word
+from .words import MIN_ORIENTATION_CONFIDENCE, PageWords, Word, text_layer_usable
 
 logger = logging.getLogger(__name__)
 
 Box = tuple[float, float, float, float]
+
+
+
+# --- pages that lie sideways or upside down ----------------------------------------------
+
+
+def turn_box(box: Box, angle: int, width: float, height: float) -> Box:
+    """A box on a page of ``width`` x ``height`` on the same page with its content turned clockwise
+    by ``angle``. With fractions of the page, width and height are 1."""
+    x0, y0, x1, y1 = box
+    corners = [(x0, y0), (x1, y1)]
+    if angle == -90:
+        corners = [(y, width - x) for x, y in corners]
+    elif angle == 180:
+        corners = [(width - x, height - y) for x, y in corners]
+    elif angle == 90:
+        corners = [(height - y, x) for x, y in corners]
+    elif angle:
+        raise ValueError(f"unsupported angle {angle}")
+    xs, ys = [x for x, _ in corners], [y for _, y in corners]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def straighten(source: SourcePage, orientation) -> tuple[SourcePage, int, bool]:
+    """``source`` the right way up, the angle it was turned by, and whether its orientation stayed
+    unknown. A page with a usable text layer stays as it is and the model is not asked; so does a
+    page the model is unsure about. ``orientation``: image -> (angle, confidence), see
+    words.PageOrientation."""
+    if source.pdf_words is not None and text_layer_usable(source.pdf_words):
+        return source, 0, False
+    angle, confidence = orientation(source.image)
+    if confidence < MIN_ORIENTATION_CONFIDENCE:
+        return source, 0, True
+    return (turned(source, angle), angle, False) if angle else (source, 0, False)
+
+
+def turned(source: SourcePage, angle: int) -> SourcePage:
+    """``source``, whose content is turned clockwise by ``angle``, the right way up. Its text layer
+    no longer applies. The model reports the turn clockwise, PIL turns counter-clockwise; steps of
+    90 degrees are lossless."""
+    width, height = source.image.size
+    size_pt = source.size_pt
+    if size_pt and angle != 180:
+        size_pt = size_pt[::-1]
+    images = [turn_box(box, undo(angle), width, height) for box in source.images] if source.images else source.images
+    return replace(source, image=source.image.rotate(angle, expand=True), pdf_words=None, pdf_marks=None,
+                   size_pt=size_pt, images=images)
+
+
+def undo(angle: int) -> int:
+    """The turn that takes back ``angle``, for ``turn_box``."""
+    return angle if angle == 180 else -angle
 
 
 # --- letters-and-digits streams --------------------------------------------------------
@@ -118,6 +179,8 @@ class Occurrence:
     words: list[int]
     how: str  # exact | reader | fuzzy
     missing: int = 0  # characters of the value no word on the page accounts for
+    also: list[Entity] = field(default_factory=list)  # further values at this place (a name in an e-mail address)
+    whole: bool = False  # a place from the cloud: its boxes are drawn and switched as one
 
 
 @dataclass
@@ -130,6 +193,10 @@ class PageState:
     redact: dict[int, set] = field(default_factory=lambda: defaultdict(set))  # word -> {(category, how)}
     occurrences: list[Occurrence] = field(default_factory=list)
     qr_codes: list[Box] = field(default_factory=list)  # blacked out whole (find_qr_codes)
+    signatures: list[Box] = field(default_factory=list)  # blacked out whole, as the service reports them
+    bar_pad: float = 0.15  # the service's boxes are finished bars: 0
+    angle: int = 0  # how the page lay: its content was turned clockwise by this; ``source`` is straight
+    orientation_unknown: bool = False  # nothing could tell which way up it lies: it stayed as it is
     # review: words kept readable, boxes drawn by hand, signature and QR code boxes switched off (pixels)
     removed: set[int] = field(default_factory=set)
     manual_boxes: list[Box] = field(default_factory=list)
@@ -508,6 +575,8 @@ class RedactionJob:
     llm_ids: list = field(default_factory=list)
     seconds: float = 0.0
     qr_codes: bool = False  # QR codes were looked for
+    verifier: SwissDocAIRedact | None = None  # the service checks the result instead of the local OCR
+    document_id: str | None = None
 
 
 def _no_progress(stage: str, done: int, total: int) -> None:
@@ -515,14 +584,20 @@ def _no_progress(stage: str, done: int, total: int) -> None:
 
 
 def analyze_document(path: str | Path, client, reader=None, ocr=None, categories=DEFAULT_CATEGORIES, dpi: int = 200,
-                     progress=_no_progress, policy=None, rule_categories=None, qr_codes: bool = True) -> RedactionJob:
+                     progress=_no_progress, policy=None, rule_categories=None, qr_codes: bool = True,
+                     orientation=None) -> RedactionJob:
     """Steps 1–4: words, transcription, personal data, where it sits. ``progress(stage, done,
     total)`` is called per page ("words", "reading") and per step ("personal data", "locating").
     ``policy``: the user's lists of what to black out and keep (policy.Policy); ``categories``
     then only switches the rules (AHV, IBAN, phone, e-mail …) on and off — or ``rule_categories``.
     ``qr_codes``: black out every QR code on the pages, whatever it holds (False: leave them readable).
+    ``orientation``: image -> (angle, confidence), straightens pages without a usable text layer
+    (words.PageOrientation; None: pages stay as they are).
     A reader with a ``close()`` (a local llama.cpp reader) is closed after the last page, so
     its memory is free for the PII model."""
+    if isinstance(reader, SwissDocAIReader) and isinstance(client, SwissDocAIPii):
+        return analyze_in_cloud(path, SwissDocAIRedact(client.client), categories, dpi, progress, policy, qr_codes,
+                                rule_categories)
     started = time.time()
     document_id = new_document_id()
     for service in (reader, client):  # the SwissDocAI services: one id for all calls about this document
@@ -535,15 +610,18 @@ def analyze_document(path: str | Path, client, reader=None, ocr=None, categories
     pages = []
     for i, source in enumerate(sources):
         progress("words", i, len(sources))
-        pages.append(PageState(source, analyzer.page_words(source),
-                               qr_codes=find_qr_codes(source.image) if qr_codes else []))
+        straight, angle, unknown = straighten(source, orientation) if orientation else (source, 0, False)
+        pages.append(PageState(straight, analyzer.page_words(straight),
+                               qr_codes=find_qr_codes(straight.image) if qr_codes else [],
+                               angle=angle, orientation_unknown=unknown))
     for i, page in enumerate(pages):
         if reader:
             progress("reading", i, len(pages))
             page.reader_text = reader(page.source.image)
-        logger.info("page %d: %d words (%s)%s%s", page.source.page_number, len(page.words.words), page.words.source,
+        logger.info("page %d: %d words (%s)%s%s%s", page.source.page_number, len(page.words.words), page.words.source,
                     f", {len(page.reader_text)} reader chars" if reader else "",
-                    f", {len(page.qr_codes)} QR code(s)" if page.qr_codes else "")
+                    f", {len(page.qr_codes)} QR code(s)" if page.qr_codes else "",
+                    f", turned by {page.angle} degrees" if page.angle else "")
     if hasattr(reader, "close"):
         reader.close()
 
@@ -586,6 +664,124 @@ def analyze_document(path: str | Path, client, reader=None, ocr=None, categories
                         time.time() - started, qr_codes)
 
 
+def upload_of(path: Path, sources: list[SourcePage]) -> bytes:
+    """The document as the service takes it: PDF, PNG and JPEG as they are, other images as a PNG,
+    several pages (a multi-page TIFF) as a PDF of the pages."""
+    if path.suffix.lower() in (".pdf", ".png", ".jpg", ".jpeg"):
+        return path.read_bytes()
+    if len(sources) == 1:
+        buffer = io.BytesIO()
+        sources[0].image.save(buffer, "PNG")
+        return buffer.getvalue()
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as folder:
+        target = Path(folder) / "document.pdf"
+        save_pdf([s.image for s in sources], [s.size_pt for s in sources], target)
+        return target.read_bytes()
+
+
+def _cloud_page(source: SourcePage, info: dict) -> PageState:
+    """A page for the review of the service's findings, straight like a page read here. Boxes in
+    the wrong place would leave values readable, so a page that does not have the shape the
+    service saw is refused."""
+    width, height = source.image.size
+    sent_width, sent_height = info.get("width_pt"), info.get("height_pt")
+    if sent_width and sent_height and abs(sent_width / sent_height - width / height) > 0.02 * width / height:
+        raise SaasError("SwissDocAI redaction: a page has another shape at the service than here")
+    angle = int(info.get("angle") or 0)
+    straight = replace(turned(source, angle) if angle else source, images=None)
+    page = PageState(straight, PageWords(*straight.image.size, [], [], source=info.get("word_source", "")),
+                     bar_pad=0.0, angle=angle)
+    page.stream = Stream()
+    return page
+
+
+def _add_place(page: PageState, item: dict, boxes: list[Box], entities: dict[str, Entity], off: set) -> None:
+    """One of the service's places on ``page``; its boxes become words of the page, so that the
+    review switches and lists them like local findings. ``off``: values of a rule the user
+    switched off: such a place goes, unless another value sits there too."""
+    main = item.get("entity")
+    if main in off:
+        others = [e for e in item.get("entities", []) if e in entities]
+        if not others:
+            return
+        main = others[0]
+    entity = entities.get(main)
+    if item.get("kind") == "qr_code":
+        page.qr_codes += boxes
+    elif item.get("kind") == "signature":
+        page.signatures += boxes
+    elif item.get("kind") != "value" or entity is None:  # never leave out a box
+        page.manual_boxes += boxes
+    else:
+        how = str(item.get("how") or "cloud")
+        indices = []
+        for box in boxes:
+            page.words.words.append(Word(entity.text, box))
+            indices.append(len(page.words.words) - 1)
+            page.redact[indices[-1]].add((entity.category, how))
+        also = [entities[e] for e in item.get("entities", []) if e in entities and e != main]
+        page.occurrences.append(Occurrence(entity, _folded(entity.text), indices, how,
+                                           int(item.get("missing_chars") or 0), also, whole=True))
+
+
+def analyze_in_cloud(path: str | Path, service: SwissDocAIRedact, categories=DEFAULT_CATEGORIES, dpi: int = 200,
+                     progress=_no_progress, policy=None, qr_codes: bool = True,
+                     rule_categories=None) -> RedactionJob:
+    """Steps 0-4 at the service, in one job; the pages are rendered here for the review and the
+    output. ``rule_categories``: the service always applies all its rules, so what only a rule of
+    another category found is left out here, as if the rule had not run. What the model found
+    too stays: the service reports such a value as the model's."""
+    started = time.time()
+    path = Path(path)
+    sources = load_pages(path, dpi)
+    if not sources:
+        raise ValueError(f"No pages loaded from {path}")
+    if len(sources) > REDACT_MAX_PAGES:
+        raise SaasTooLarge(f"SwissDocAI redaction: {len(sources)} pages, at most {REDACT_MAX_PAGES}")
+    document_id = new_document_id()
+    result = service.redact(upload_of(path, sources), document_id, categories, policy, qr_codes, progress)
+
+    infos = {info.get("page"): info for info in result.get("pages", [])}
+    if any(source.page_number not in infos for source in sources):
+        raise SaasError("SwissDocAI redaction: the answer does not cover every page")
+    pages = {s.page_number: _cloud_page(s, infos[s.page_number]) for s in sources}
+    entities = {e.get("id"): Entity(str(e.get("text", "")), str(e.get("category", "")), str(e.get("source", "")))
+                for e in result.get("entities", [])}
+    off = {key for key, e in entities.items() if rule_categories is not None and e.source.startswith("rule:")
+           and e.category not in rule_categories}
+    entities = {key: e for key, e in entities.items() if key not in off}
+    progress("locating", 0, 1)
+    for item in result.get("items", []):
+        page = pages.get(item.get("page"))
+        if page is None:
+            raise SaasError("SwissDocAI redaction: a finding on a page that is not in the document")
+        width, height = page.source.image.size
+        fractions = [turn_box(box, undo(page.angle), 1, 1) for box in item.get("boxes", [])]  # on the page as sent
+        boxes = [(x0 * width, y0 * height, x1 * width, y1 * height) for x0, y0, x1, y1 in fractions]
+        if boxes:
+            _add_place(page, item, boxes, entities, off)
+    not_found = [entities[e.get("id")] for e in result.get("entities", [])
+                 if e.get("found") is False and e.get("id") in entities]
+    return RedactionJob(path, list(pages.values()), list(entities.values()), not_found, tuple(categories), dpi, None,
+                        service.model, [service.model], time.time() - started, qr_codes, service, document_id)
+
+
+def cloud_values(job: RedactionJob) -> list[dict]:
+    """What the service must not find on the redacted pages: every value under a bar, and the
+    values it could not place (a reviewer has to black those out by hand)."""
+    values: dict[tuple[str, str], dict] = {}
+    for page in job.pages:
+        for occ in page.occurrences:
+            if not set(occ.words) <= page.removed:
+                for entity in (occ.entity, *occ.also):
+                    values[entity.text, entity.category] = {"text": entity.text, "category": entity.category}
+    for entity in job.not_found:
+        values[entity.text, entity.category] = {"text": entity.text, "category": entity.category}
+    return list(values.values())
+
+
 def _word_bars(page: PageState) -> list[tuple[Box, str]]:
     """(bar, category) over the redacted words of ``page`` except those a reviewer kept readable."""
     by_category: dict[str, set] = defaultdict(set)
@@ -593,14 +789,15 @@ def _word_bars(page: PageState) -> list[tuple[Box, str]]:
         if j not in page.removed:
             by_category[sorted(marks)[0][0]].add(j)
     return [(bar, category) for category, indices in by_category.items()
-            for bar in redaction_bars(page.words.words, indices)]
+            for bar in redaction_bars(page.words.words, indices, page.bar_pad)]
 
 
 def area_boxes(page: PageState, bars: list[tuple[Box, str]] | None = None) -> list[tuple[Box, str]]:
     """(box, category) of the areas blacked out whole: signature images next to a redacted name
     and QR codes — also those a reviewer switched off (``page.hidden_boxes``)."""
     person = [bar for bar, category in (_word_bars(page) if bars is None else bars) if category == "person"]
-    return [(box, "signature") for box in signature_images(page, person)] + [(box, "qr_code") for box in page.qr_codes]
+    return ([(box, "signature") for box in signature_images(page, person) + page.signatures]
+            + [(box, "qr_code") for box in page.qr_codes])
 
 
 def page_boxes(page: PageState) -> list[tuple[Box, str]]:
@@ -631,10 +828,11 @@ def toggle_at(page: PageState, x: float, y: float) -> bool:
               if w.bbox[0] <= x <= w.bbox[2] and w.bbox[1] <= y <= w.bbox[3]), None)
     if j is None:
         return False
+    place = next((occ.words for occ in page.occurrences if occ.whole and j in occ.words), [j])
     if j in page.redact and j not in page.removed:
-        page.removed.add(j)
+        page.removed.update(place)
     elif j in page.removed:
-        page.removed.discard(j)
+        page.removed.difference_update(place)
     else:
         page.redact[j].add(("manual", "manual"))
     return True
@@ -698,6 +896,7 @@ def render_job(job: RedactionJob, out_path: str | Path, verify: bool = True, rep
                                    "box_pt": [round(v * to_pt, 2) for v in box],
                                    **({"text": occ.entity.text} if report_text else {})})
         report_pages.append({"page": page.source.page_number, "wordSource": page.words.source,
+                             "angle": page.angle, "orientationUnknown": page.orientation_unknown,
                              "redactedWords": len(findings), "bars": len(labelled),
                              "signatures": sum(1 for _, c in labelled if c == "signature"),
                              "qrCodes": sum(1 for _, c in labelled if c == "qr_code"),
@@ -705,6 +904,15 @@ def render_job(job: RedactionJob, out_path: str | Path, verify: bool = True, rep
                              "manualBoxes": len(page.manual_boxes),
                              "needsReview": incomplete, "words": findings})
 
+    # the check comes first: when the service cannot be asked, nothing unchecked is written
+    verification = None
+    if verify:
+        progress("verifying", 0, 1)
+        if job.verifier:
+            verification = job.verifier.verify(burned, cloud_values(job), job.document_id, report_text, progress)
+        else:
+            verification = verify_redaction(burned, [e for e in job.entities if not kept_readable(job, e)], job.ocr,
+                                            report_text, [None if p.orientation_unknown else 0 for p in job.pages])
     save_pdf(burned, [p.source.size_pt for p in job.pages], out_path)
     if preview_dir:
         Path(preview_dir).mkdir(parents=True, exist_ok=True)
@@ -727,9 +935,7 @@ def render_job(job: RedactionJob, out_path: str | Path, verify: bool = True, rep
         "pages": report_pages,
     }
     if verify:
-        progress("verifying", 0, 1)
-        report["verification"] = verify_redaction(burned, [e for e in job.entities if not kept_readable(job, e)],
-                                                   job.ocr, report_text)
+        report["verification"] = verification
     report["seconds"] = round(job.seconds + time.time() - started, 1)
     return report
 
@@ -737,21 +943,29 @@ def render_job(job: RedactionJob, out_path: str | Path, verify: bool = True, rep
 def redact_document(path: str | Path, out_path: str | Path, client, reader=None, ocr=None,
                     categories=DEFAULT_CATEGORIES, dpi: int = 200, verify: bool = True,
                     report_text: bool = False, preview_dir: str | Path | None = None,
-                    policy=None, qr_codes: bool = True) -> dict:
+                    policy=None, qr_codes: bool = True, orientation=None) -> dict:
     """Redact ``path`` into ``out_path`` without review; returns the redaction report. ``client``:
     a chat client (the local engine's) or the SwissDocAI PII service; ``policy``: see
-    pii.detect_with_llm; ``qr_codes``: black out every QR code."""
-    job = analyze_document(path, client, reader, ocr, categories, dpi, policy=policy, qr_codes=qr_codes)
+    pii.detect_with_llm; ``qr_codes``: black out every QR code; ``orientation``: see analyze_document."""
+    job = analyze_document(path, client, reader, ocr, categories, dpi, policy=policy, qr_codes=qr_codes,
+                           orientation=orientation)
     return render_job(job, out_path, verify, report_text, preview_dir)
 
 
-def verify_redaction(images: list[Image.Image], entities: list[Entity], ocr, report_text: bool = False) -> dict:
-    """OCR the redacted pages and search them for every found string (4+ letters/digits)."""
+def verify_redaction(images: list[Image.Image], entities: list[Entity], ocr, report_text: bool = False,
+                     angles: list[int | None] | None = None) -> dict:
+    """OCR the redacted pages and search them for every found string (4+ letters/digits).
+
+    ``angles``: how each page's content is turned clockwise. A page is read the right way up, or
+    it would yield no words and pass whatever it shows; None for a page whose orientation is
+    unknown: it is read in all four directions."""
     leaks = []
     for number, image in enumerate(images, 1):
-        stream = word_stream(ocr(image).words)
+        angle = angles[number - 1] if angles else 0
+        turns = (0, 90, 180, -90) if angle is None else (angle,)
+        streams = [word_stream(ocr(image.rotate(turn, expand=True) if turn else image).words) for turn in turns]
         for e in entities:
             needle = "".join(c for c, _ in _fold(e.text))
-            if len(needle) >= 4 and find_all(stream, needle):
+            if len(needle) >= 4 and any(find_all(stream, needle) for stream in streams):
                 leaks.append({"page": number, "category": e.category, **({"text": e.text} if report_text else {})})
     return {"ok": not leaks, "stillReadable": leaks}

@@ -50,6 +50,7 @@ class Session:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._ocr = None
+        self._orientation = None
         self._pii_engine = None
 
     # --- first start ---------------------------------------------------------------------
@@ -118,6 +119,13 @@ class Session:
             self._ocr = OnnxWordReader()
         return self._ocr
 
+    def orientation(self):
+        if self._orientation is None:
+            from ..words import PageOrientation
+
+            self._orientation = PageOrientation()
+        return self._orientation
+
     def pii_client(self):
         """What finds the personal data: the local model's chat client, or the SwissDocAI PII service."""
         if self.settings.engine == "swissdocai":
@@ -152,7 +160,7 @@ class Session:
         return analyze_document(path, self.pii_client(), reader=self.reader(), ocr=self.ocr(),
                                 categories=DEFAULT_CATEGORIES, dpi=self.settings.dpi, progress=progress,
                                 policy=self.settings.effective_policy(), rule_categories=rules,
-                                qr_codes=self.settings.redact_qr_codes)
+                                qr_codes=self.settings.redact_qr_codes, orientation=self.orientation())
 
     def save(self, job: RedactionJob, out_path: str | Path, progress, write_report: bool = True) -> dict:
         report = render_job(job, out_path, verify=True, progress=progress)

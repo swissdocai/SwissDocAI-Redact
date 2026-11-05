@@ -1,5 +1,5 @@
-"""SwissDocAI cloud (ocr.swissdocai.ch): the SaaS's OCR as the page reader, and its PII
-step in place of the local model.
+"""SwissDocAI cloud (ocr.swissdocai.ch): the SaaS's OCR as the page reader, its PII step in
+place of the local model, and both in one job.
 
     POST {base}/v1/ocr   Authorization: Bearer sd_…
     {"image_base64": "…", "document_id": "…"}  ->  {"text", "pages", "processing_time_ms", "queue_time_ms"}
@@ -10,8 +10,20 @@ step in place of the local model.
     at most 200 pages and 500,000 characters per request; 413 when the findings do not
     fit one answer: then fewer pages per request.
 
-Every page sent costs a page of credit, at each endpoint: with both in the cloud a
-document page costs two. All calls for one document carry the same document_id.
+    POST {base}/v1/redact   {"image_base64", "document_id", "categories", "policy", "qr_codes"}
+        ->  {"job_id", "document_id"}, at most 50 pages
+    POST {base}/v1/redact/verify   {"pages": [base64 PNG or JPEG, ...], "values": [{"text", "category"}, ...]}
+        ->  {"job_id", "document_id"}, at most 50 pages and 2000 values, free of charge
+    GET  {base}/v1/redact/{job_id}, every 2 seconds:
+        {"status": "queued", "position", "wait_seconds"}, {"status": "running", "stage", "done", "total"},
+        {"status": "done", "pages", "result"}: the result is handed over once and charged then;
+        a job that failed answers with its HTTP error
+
+Which way a document goes (redact.analyze_document): reading and the PII step both in the
+cloud, /v1/redact: one job, one page of credit per page. Only the PII step in the cloud,
+/v1/pii: the page texts go up, never images, one page of credit per page. Only reading in the
+cloud, /v1/ocr, also one. All calls for one document carry the same document_id, which is
+random: never the file name, it can hold personal data.
 
 The OCR service takes PDF, PNG or JPEG (up to 50 MB) and transcribes every
 page to Markdown; several pages come back joined with "--- Seite N ---". The PII
@@ -36,16 +48,56 @@ SAAS_URL = "https://ocr.swissdocai.ch"
 
 
 class SaasError(RuntimeError):
-    pass
+    code = ""  # what the window says about it (locales: cloudError.<code>)
 
 
 class SaasTooLarge(SaasError):
     """413: the request (or the findings for it) is too large: send fewer pages."""
 
+    code = "tooLarge"
+
+
+class SaasToken(SaasError):
+    """401, 403: the API token is not valid."""
+
+    code = "token"
+
+
+class SaasUnreadable(SaasError):
+    """400: the service cannot read the file."""
+
+    code = "unreadable"
+
+
+class SaasNoCredit(SaasError):
+    """429 from a job: the credit is used up. Asking again does not help."""
+
+    code = "credit"
+
+
+class SaasBusy(SaasError):
+    """503, or no answer: too many requests, or the service is briefly away. Try again later."""
+
+    code = "busy"
+
+
+class SaasGone(SaasError):
+    """404: the job's result was fetched already, or nobody fetched it for ten minutes."""
+
+    code = "gone"
+
 
 # the PII endpoint's limits per request
 PII_MAX_PAGES = 200
 PII_MAX_CHARS = 500_000
+
+# the job endpoints' limits per request
+REDACT_MAX_PAGES = 50
+VERIFY_MAX_VALUES = 2000
+VERIFY_MAX_BYTES = 30_000_000  # of page images per request: requests may have 50 MB, base64 adds a third
+POLL_SECONDS = 2.0
+POLL_FAILURES = 10  # polls in a row without an answer before giving up
+JOB_MAX_SECONDS = 3600.0
 
 
 def api_key() -> str | None:
@@ -76,30 +128,93 @@ class SaasClient:
                                       "policy": policy.to_dict() if policy else None,
                                       "document_id": document_id or _document_id()}, "PII")
 
-    def _post(self, path: str, body: dict, what: str) -> dict:
-        """POST with the token; retries when the service is busy or failing (429, 5xx)."""
+    def job(self, path: str, body: dict, what: str, progress=None) -> dict:
+        """Start a job and wait for it; its answer holds the ``result``. ``progress(stage, done,
+        total)`` follows it; while it waits for its turn the stage is "queued", ``done`` its place
+        (1 = next) and ``total`` the estimated wait in seconds."""
+        started = self._post(path, body, what, retry_on=(500, 502, 503, 504))
+        return self._follow(started["job_id"], what, progress or (lambda stage, done, total: None))
+
+    def _follow(self, job_id: str, what: str, progress) -> dict:
+        """Ask for a job's state until it ends. A job's result is handed over only once, so
+        nothing here gives up on it lightly: an answer that does not come is asked for again."""
         import httpx
 
         headers = {"Authorization": f"Bearer {self.token}"}
+        deadline = time.monotonic() + JOB_MAX_SECONDS
+        failures = 0
+        while time.monotonic() < deadline:
+            try:
+                response = httpx.get(f"{self.base_url}/v1/redact/{job_id}", headers=headers, timeout=self.timeout)
+            except httpx.TransportError:
+                response = None
+            if response is None or response.status_code in (502, 503, 504):
+                failures += 1
+                if failures > POLL_FAILURES:
+                    self._fail(response, what)
+                time.sleep(POLL_SECONDS)
+                continue
+            if response.status_code == 404 and failures:  # a job that failed with 503 answers only once
+                raise SaasBusy(f"SwissDocAI {what}: the service was away and the job is lost")
+            if response.status_code != 200:
+                self._fail(response, what)
+            failures = 0
+            answer = response.json()
+            status = answer.get("status")
+            if status == "done":
+                return answer
+            if status == "queued":
+                progress("queued", int(answer.get("position") or 0), int(answer.get("wait_seconds") or 0))
+            elif status == "running":
+                progress(answer.get("stage") or "pages", int(answer.get("done") or 0), int(answer.get("total") or 0))
+            else:
+                raise SaasError(f"SwissDocAI {what}: unknown job state")
+            time.sleep(POLL_SECONDS)
+        raise SaasBusy(f"SwissDocAI {what}: the job did not finish in time")
+
+    def _fail(self, response, what: str) -> None:
+        """Raise the error for an answer of a job endpoint (None: no answer at all)."""
+        status = response.status_code if response is not None else 0
+        detail = _detail(response)
+        kinds = {400: SaasUnreadable, 401: SaasToken, 403: SaasToken, 404: SaasGone, 413: SaasTooLarge,
+                 429: SaasNoCredit, 503: SaasBusy, 0: SaasBusy}
+        raise kinds.get(status, SaasError)(f"SwissDocAI {what}: {status or 'no answer'} {detail}".strip())
+
+    def _post(self, path: str, body: dict, what: str, retry_on=(429, 500, 502, 503, 504)) -> dict:
+        """POST with the token; retries when the service is busy or failing (``retry_on``)."""
+        import httpx
+
+        headers = {"Authorization": f"Bearer {self.token}"}
+        job = 429 not in retry_on  # the job endpoints' errors say more than the older ones'
         for attempt in range(self.retries + 1):
             try:
                 response = httpx.post(f"{self.base_url}{path}", json=body, headers=headers, timeout=self.timeout)
             except httpx.TransportError as error:
                 if attempt == self.retries:
-                    raise SaasError(f"SwissDocAI not reachable: {error}") from error
+                    raise (SaasBusy if job else SaasError)(f"SwissDocAI not reachable: {error}") from error
             else:
                 if response.status_code == 200:
                     return response.json()
                 if response.status_code in (401, 403):
-                    raise SaasError("SwissDocAI rejected the API token")
+                    raise SaasToken("SwissDocAI rejected the API token")
                 if response.status_code == 413:
                     raise SaasTooLarge(f"SwissDocAI {what}: too large ({response.text[:200]})")
-                if response.status_code not in (429, 500, 502, 503, 504) or attempt == self.retries:
+                if response.status_code not in retry_on or attempt == self.retries:
+                    if job:
+                        self._fail(response, what)
                     raise SaasError(f"SwissDocAI {what} failed: {response.status_code} {response.text[:200]}")
             wait = 2 ** attempt * 3
             logger.warning("SwissDocAI %s busy or failing, retrying in %ds", what, wait)
             time.sleep(wait)
         raise SaasError(f"SwissDocAI {what} failed")
+
+
+def _detail(response) -> str:
+    """The ``detail`` of an error answer."""
+    try:
+        return str(response.json().get("detail", ""))[:200]
+    except (AttributeError, ValueError):
+        return ""
 
 
 def _document_id() -> str:
@@ -173,6 +288,62 @@ class SwissDocAIPii:
                     len(answer.get("entities", [])), answer.get("model", "?"), answer.get("processing_time_ms", 0),
                     answer.get("queue_time_ms", 0))
         return answer.get("entities", [])
+
+
+class SwissDocAIRedact:
+    """Reading and the PII step in one job (redact.analyze_document): the document goes up once,
+    the values come back with where they sit. The app draws the bars itself, and the redacted
+    pages can be read again by the service (``verify``)."""
+
+    model = "swissdocai.ch/v1/redact"
+
+    def __init__(self, client: SaasClient | None = None):
+        self.client = client or SaasClient()
+
+    def redact(self, data: bytes, document_id: str, categories, policy=None, qr_codes: bool = True,
+               progress=None) -> dict:
+        """The service's findings for one document (PDF, PNG or JPEG bytes): entities, pages, items."""
+        body = {"image_base64": base64.b64encode(data).decode("ascii"), "document_id": document_id,
+                "categories": list(categories), "qr_codes": qr_codes}
+        if policy:
+            body["policy"] = policy.to_dict()
+        answer = self.client.job("/v1/redact", body, "redaction", progress)
+        result = answer.get("result") or {}
+        logger.info("SwissDocAI redaction: %d pages, %d values, %d places", answer.get("pages", 0),
+                    len(result.get("entities", [])), len(result.get("items", [])))
+        return result
+
+    def verify(self, images: list, values: list[dict], document_id: str, report_text: bool = False,
+               progress=None) -> dict:
+        """The redacted ``images`` read again and searched for ``values``, within the service's
+        limits per request; in the form of redact.verify_redaction's report."""
+        leaks: list[dict] = []
+        for first, pages in _encoded_batches(images):
+            for start in range(0, max(1, len(values)), VERIFY_MAX_VALUES):
+                body = {"pages": pages, "values": values[start:start + VERIFY_MAX_VALUES], "document_id": document_id}
+                result = self.client.job("/v1/redact/verify", body, "check", progress).get("result") or {}
+                leaks += [{"page": first + int(leak.get("page", 1)) - 1, "category": leak.get("category", ""),
+                           **({"text": leak.get("text", "")} if report_text else {})}
+                          for leak in result.get("still_readable", [])]
+        logger.info("SwissDocAI check: %d pages, %d values, %d still readable", len(images), len(values), len(leaks))
+        return {"ok": not leaks, "stillReadable": leaks}
+
+
+def _encoded_batches(images: list) -> list[tuple[int, list[str]]]:
+    """(number of the first page, base64 JPEGs) in requests within the limits of the verification."""
+    batches, current, size, first = [], [], 0, 1
+    for number, image in enumerate(images, 1):
+        buffer = io.BytesIO()
+        image.convert("RGB").save(buffer, "JPEG", quality=92, subsampling=0)  # as save_pdf writes it
+        page = base64.b64encode(buffer.getvalue()).decode("ascii")
+        if current and (len(current) == REDACT_MAX_PAGES or size + len(page) > VERIFY_MAX_BYTES / 3 * 4):
+            batches.append((first, current))
+            current, size, first = [], 0, number
+        current.append(page)
+        size += len(page)
+    if current:
+        batches.append((first, current))
+    return batches
 
 
 def _batches(pages: list[str]) -> list[list[str]]:

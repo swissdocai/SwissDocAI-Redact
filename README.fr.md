@@ -37,19 +37,20 @@ commentaires dans lesquels des données caviardées pourraient subsister.
 ## Vos données restent chez vous
 
 L'application fonctionne entièrement sur votre ordinateur. Après l'installation unique, elle
-n'a plus besoin d'Internet, et aucun document ne quitte l'ordinateur.
+n'a plus besoin d'Internet, et aucun document ne quitte l'ordinateur. La télémétrie d'ONNX
+Runtime, qui exécute la reconnaissance de texte, est désactivée.
 
-Si vous le souhaitez, vous pouvez confier certaines étapes à **SwissDocAI Cloud**, avec un
+Si vous le souhaitez, vous pouvez confier des étapes à **SwissDocAI Cloud**, avec un
 traitement en Suisse ([swissdocai.ch](https://swissdocai.ch)) – par exemple si votre
 ordinateur n'a pas de carte graphique adaptée. C'est une option sous « Paramètres » →
 « Général », désactivée par défaut :
 
-- **Lecture des pages :** les images des pages sont lues en Suisse.
-- **Recherche des données personnelles :** seul le texte des pages est vérifié en Suisse,
-  aucune image.
+- **Seulement la recherche des données personnelles dans le cloud :** les pages sont lues sur
+  votre ordinateur. Seul leur texte est vérifié en Suisse, aucune image.
+- **Lecture et recherche dans le cloud :** le document est envoyé une seule fois en Suisse.
 
-Chaque service coûte une page de crédit par page de document, les deux ensemble deux. Il vous
-faut pour cela un jeton API de la console SwissDocAI.
+Les deux coûtent une page de crédit par page. Il vous faut pour cela un jeton API de la console
+SwissDocAI.
 
 ## Installation
 

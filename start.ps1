@@ -62,6 +62,7 @@ if (-not (Test-Path 'node_modules\.package-lock.json') -or
 }
 
 $env:PYTHONPATH = "$root"
+$env:ORT_DISABLE_TELEMETRY = '1'
 $env:SWISSDOCAI_ENGINE = "$python|-m|swissdocai.app.api"
 Write-Host 'Starting SwissDocAI Redact. The first start compiles the app, which takes a few minutes.'
 npm run tauri dev

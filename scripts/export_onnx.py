@@ -12,9 +12,12 @@ Usage:
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
+
+os.environ["ORT_DISABLE_TELEMETRY"] = "1"  # this script loads ONNX Runtime without the swissdocai package
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))

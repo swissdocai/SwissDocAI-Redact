@@ -40,10 +40,16 @@ Every page is read twice, and the two readings check each other.
    and the IBAN. The pages are written as an image-only PDF with a report. The result
    is read again to make sure no finding is still readable.
 
-Nothing leaves the machine unless a SwissDocAI service (in Switzerland) is chosen: the
-OCR service as page reader, or the PII service in place of the local model. Each costs
-one page of credit per document page, so a page with both costs two; the app says so in
-its settings.
+Nothing leaves the machine unless a SwissDocAI service (in Switzerland) is chosen, and ONNX
+Runtime's telemetry is off (`swissdocai/__init__.py`). The OCR service alone is `/v1/ocr`; the PII
+service alone is `/v1/pii`, which gets only text; both together are one job at
+`/v1/redact`, whose findings enter the same review and whose result the service reads again
+(`/v1/redact/verify`). Each of the three costs one page of credit per document page.
+
+Scans that lie sideways or upside down are straightened first (pages without a usable text
+layer, OnnxTR's page orientation model; when it is unsure, it also sees the page in the other
+three positions and the answers vote). The review and the redacted PDF show the straight page,
+also with the cloud option, where the service reports each page's angle.
 
 ## Results
 

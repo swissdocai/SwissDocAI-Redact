@@ -36,18 +36,19 @@ sopravvivere.
 ## I tuoi dati restano tuoi
 
 L'app lavora interamente sul tuo computer. Dopo la configurazione iniziale non ha più bisogno di
-Internet e nessun documento lascia il computer.
+Internet e nessun documento lascia il computer. La telemetria di ONNX Runtime, che esegue il
+riconoscimento del testo, è disattivata.
 
-Se lo desideri, puoi affidare singole fasi a **SwissDocAI Cloud**, con elaborazione in Svizzera
+Se lo desideri, puoi affidare alcune fasi a **SwissDocAI Cloud**, con elaborazione in Svizzera
 ([swissdocai.ch](https://swissdocai.ch)) – per esempio se il computer non ha una scheda grafica
 adatta. È un'opzione in «Impostazioni» → «Generale», disattivata per impostazione predefinita:
 
-- **Lettura delle pagine:** le immagini delle pagine vengono lette in Svizzera.
-- **Ricerca dei dati personali:** in Svizzera viene verificato solo il testo delle pagine,
-  nessuna immagine.
+- **Solo la ricerca dei dati personali nel cloud:** le pagine vengono lette sul tuo computer. In
+  Svizzera viene verificato solo il loro testo, nessuna immagine.
+- **Lettura e ricerca nel cloud:** il documento viene inviato una sola volta in Svizzera.
 
-Ogni servizio costa una pagina di credito per ogni pagina del documento, entrambi insieme due.
-Serve un token API della console SwissDocAI.
+Entrambe le opzioni costano una pagina di credito per pagina. Serve un token API della console
+SwissDocAI.
 
 ## Installazione
 

@@ -25,6 +25,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+# PyInstaller loads ONNX Runtime while it collects the packages, and the build's check starts the engine
+os.environ["ORT_DISABLE_TELEMETRY"] = "1"
+
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 VENV = BUILD / "engine-venv"

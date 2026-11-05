@@ -53,6 +53,7 @@ if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modu
 fi
 
 export PYTHONPATH="$root"
+export ORT_DISABLE_TELEMETRY=1
 export SWISSDOCAI_ENGINE="$python|-m|swissdocai.app.api"
 echo "Starting SwissDocAI Redact. The first start compiles the app, which takes a few minutes."
 exec npm run tauri dev

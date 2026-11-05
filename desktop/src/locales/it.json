@@ -31,6 +31,8 @@
     "failed": "Non riuscito"
   },
   "stage": {
+    "queued": "In coda, posizione {{n}}",
+    "pages": "Preparazione delle pagine",
     "words": "Riconoscimento delle parole",
     "reading": "Lettura delle pagine",
     "personal data": "Ricerca dei dati personali",
@@ -84,10 +86,24 @@
     "other": "Altro"
   },
   "saved": {
+    "failed": "{{name}} non è stato salvato: {{error}}",
     "verified": "{{name}} salvato. Rileggendolo, nessuno dei valori oscurati è leggibile.",
     "unverified": "{{name}} salvato, ma rileggendolo {{count}} valore/i è/sono ancora leggibile/i – verificare.",
     "plain": "{{name}} salvato.",
     "show": "Mostra nella cartella"
+  },
+  "queue": {
+    "busy": "Ci scusiamo, al momento riceviamo molte richieste. Potrebbe volerci un po' più di tempo.",
+    "wait_one": "Attesa stimata: circa {{count}} minuto.",
+    "wait_other": "Attesa stimata: circa {{count}} minuti."
+  },
+  "cloudError": {
+    "token": "SwissDocAI ha rifiutato il token API. Controllalo nelle impostazioni.",
+    "credit": "Il tuo credito SwissDocAI è esaurito. Puoi ricaricarlo nella console SwissDocAI.",
+    "busy": "SwissDocAI Cloud è sovraccarico o brevemente non raggiungibile. Riprova tra qualche minuto.",
+    "tooLarge": "Il documento è troppo grande per SwissDocAI Cloud: al massimo 50 pagine. Dividilo o elaboralo su questo computer.",
+    "unreadable": "SwissDocAI Cloud non ha potuto leggere il file.",
+    "gone": "Il risultato non è più disponibile. Analizza di nuovo il documento."
   },
   "settings": {
     "title": "Impostazioni",
@@ -112,11 +128,18 @@
     "save": "Salva",
     "cancel": "Annulla",
     "nextDocument": "Vale dal prossimo documento analizzato.",
+    "modeTitle": "Dove vengono elaborati i tuoi documenti",
+    "modeIntro": "L'elaborazione nel cloud avviene in Svizzera (swissdocai.ch) e non richiede una scheda grafica potente.",
+    "modeLocal": "Tutto su questo computer",
+    "modeLocalHint": "I documenti e il testo non lasciano il computer.",
+    "modePii": "Solo la ricerca nel cloud",
+    "modePiiHint": "Le pagine vengono lette qui. Solo il loro testo va nel cloud, nessuna immagine.",
+    "modeCloud": "Lettura e ricerca nel cloud",
+    "modeCloudHint": "Il documento viene inviato una sola volta nel cloud.",
+    "cloudCostPii": "Ricerca dei dati personali nel cloud: una pagina di credito per pagina.",
     "readerTitle": "Lettura delle pagine",
     "readerLocal": "Su questo computer",
     "readerLocalHint": "GLM-OCR – le pagine non lasciano il computer.",
-    "readerCloud": "SwissDocAI Cloud",
-    "readerCloudHint": "Le pagine vengono lette in Svizzera (swissdocai.ch). Fatturato per pagina.",
     "readerNone": "Disattivato",
     "readerNoneHint": "Solo le parole riconosciute – il più veloce, meno contesto.",
     "readerIntro": "Un modello di lettura trascrive ogni pagina. I dati personali vengono cercati in questo testo; le parole riconosciute indicano dove oscurare. Così due letture si controllano a vicenda.",
@@ -126,15 +149,8 @@
     "tokenFromEnv": "Dall'ambiente (SWISSDOCAI_API_KEY).",
     "tokenHint": "Il token si trova nella console SwissDocAI alla voce «Token API».",
     "tokenMissing": "SwissDocAI Cloud richiede un token API.",
-    "piiTitle": "Ricerca dei dati personali",
-    "piiIntro": "Un modello linguistico cerca i dati personali nel testo delle pagine, secondo le vostre liste in «Cosa oscurare».",
-    "piiLocal": "Su questo computer",
-    "piiLocalHint": "Gemma 4 E4B – il testo non lascia il computer.",
-    "piiCloud": "SwissDocAI Cloud",
-    "piiCloudHint": "Solo il testo delle pagine viene analizzato in Svizzera (swissdocai.ch), nessuna immagine. Fatturato per pagina.",
     "cloudTitle": "SwissDocAI Cloud",
-    "cloudCostOne": "Ogni pagina di un documento costa 1 pagina di credito.",
-    "cloudCostBoth": "Ogni pagina di un documento costa 2 pagine di credito: una per la lettura, una per i dati personali.",
+    "cloudCostBoth": "Lettura e ricerca dei dati personali nel cloud: una pagina di credito per pagina.",
     "titledRule": "Oscurare sempre i nomi dopo un titolo (Dr., Prof., PD)",
     "titledRuleHint": "Regola di sicurezza: «Dr. med. Esempio» è sempre una persona – anche se il modello la considera parte dell'organizzazione.",
     "qrRule": "Oscurare i codici QR",
@@ -142,7 +158,7 @@
   },
   "setup": {
     "title": "Configurazione iniziale",
-    "text": "Per funzionare interamente su questo computer, l'app scarica una sola volta i suoi modelli (circa {{gb}} GB). Poi funziona offline.",
+    "text": "Per funzionare interamente su questo computer, l'app scarica una sola volta i suoi modelli (circa {{gb}} GB). Poi funziona offline, senza telemetria.",
     "download": "Scarica",
     "later": "Più tardi",
     "resume": "Riprendi",

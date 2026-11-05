@@ -158,7 +158,7 @@ def _policy(path: str | None):
 def cmd_redact(args) -> None:
     from .pii import CATEGORIES, DEFAULT_CATEGORIES
     from .redact import redact_document
-    from .words import DoctrWordReader, OnnxWordReader
+    from .words import SWISS_RECOGNIZER, DoctrWordReader, OnnxWordReader, PageOrientation, ensure_ocr_models
 
     categories = tuple(c.strip() for c in args.categories.split(",")) if args.categories else DEFAULT_CATEGORIES
     unknown = [c for c in categories if c not in CATEGORIES]
@@ -179,11 +179,14 @@ def cmd_redact(args) -> None:
         reader = MarkdownModel(args.reader, max_new_tokens=args.max_new_tokens)
     output = Path(args.output) if args.output else Path(args.input).with_name(Path(args.input).stem + ".redacted.pdf")
     client, engine = _pii_client(args)
+    ocr = (OnnxWordReader(det_arch=args.ocr_det, reco_arch=args.ocr_reco) if args.ocr == "onnx"
+           else DoctrWordReader(det_arch=args.ocr_det, reco_arch=args.ocr_reco or "parseq"))
+    # the command line has no setup step: before the document, not during it
+    ensure_ocr_models(ocr.det_arch, ocr.reco_arch) if args.ocr == "onnx" else ensure_ocr_models(
+        str(SWISS_RECOGNIZER), str(SWISS_RECOGNIZER))
     try:
         report = redact_document(
-            args.input, output, client=client, reader=reader,
-            ocr=OnnxWordReader(det_arch=args.ocr_det, reco_arch=args.ocr_reco) if args.ocr == "onnx"
-            else DoctrWordReader(det_arch=args.ocr_det, reco_arch=args.ocr_reco or "parseq"),
+            args.input, output, client=client, reader=reader, ocr=ocr, orientation=PageOrientation(),
             categories=categories,
             dpi=args.dpi, verify=not args.no_verify, report_text=args.report_text, preview_dir=args.preview,
             policy=_policy(args.policy), qr_codes=args.qr_codes,

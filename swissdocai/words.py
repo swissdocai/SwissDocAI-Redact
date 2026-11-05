@@ -225,8 +225,21 @@ def _page_words(page, width: int, height: int) -> PageWords:
 # from output/doctr_models/parseq_swiss.pt by scripts/export_onnx.py; shipped with the package.
 SWISS_RECOGNIZER = Path(__file__).parent / "models" / "parseq_swiss.onnx"
 
+ORIENTATION_ARCH = "mobilenet_v3_small_page_orientation"  # which way up a page lies
+MIN_ORIENTATION_CONFIDENCE = 0.8  # below it, a page stays as it is
+
 
 CPU_ONLY = ["CPUExecutionProvider"]
+
+
+def onnxruntime():
+    """ONNX Runtime with its telemetry events off: the only way to import it here. The environment
+    variable (swissdocai/__init__.py) stops the Linux collector; this call is the switch of the
+    Python API, for the Windows builds' events."""
+    import onnxruntime as ort
+
+    ort.disable_telemetry_events()
+    return ort
 
 
 def onnx_providers() -> list:
@@ -236,10 +249,9 @@ def onnx_providers() -> list:
     Never CoreML (Apple): it cannot build the PARSeq recognizer ("Unable to get shape
     for output: /Squeeze_output_0") and would compute in half precision, which the
     recognizer was not measured with; Apple's CPUs read a page in about a second."""
-    import onnxruntime as ort
-
     from .engine import detect_hardware
 
+    ort = onnxruntime()
     if os.environ.get("SWISSDOCAI_OCR_DEVICE", "").lower() == "cpu" or detect_hardware().best_gpu is None:
         return CPU_ONLY
     available = ort.get_available_providers()
@@ -250,9 +262,10 @@ def _onnx_model_urls(det_arch: str, reco_arch: str) -> list[str]:
     import importlib
 
     families = {"detection": ("differentiable_binarization", "fast", "linknet"),
-                "recognition": ("crnn", "master", "parseq", "sar", "viptr", "vitstr")}
+                "recognition": ("crnn", "master", "parseq", "sar", "viptr", "vitstr"),
+                "classification": ("mobilenet",)}
     urls = []
-    for arch, task in ((det_arch, "detection"), (reco_arch, "recognition")):
+    for arch, task in ((det_arch, "detection"), (reco_arch, "recognition"), (ORIENTATION_ARCH, "classification")):
         if arch.endswith(".onnx"):
             continue
         for family in families[task]:
@@ -275,6 +288,56 @@ def ensure_ocr_models(det_arch: str = "db_resnet50", reco_arch: str = "parseq", 
         download(url, cache_dir() / "onnxtr" / "models" / name, progress=progress, label=name)
 
 
+class PageOrientation:
+    """Which way up a page lies, through OnnxTR's page orientation model on the CPU (one small
+    image per page). ``ensure_ocr_models`` downloads the model during setup; this class only ever
+    reads it from the cache, so a document never starts a download. Without the file it stops:
+    a sideways scan read as it lies would yield no words, and so no bars."""
+
+    def __init__(self):
+        self._predictor = None
+
+    def _load(self):
+        ort = onnxruntime()
+        from onnxtr.models import EngineConfig, classification, page_orientation_predictor
+
+        from .engine import cache_dir
+
+        name = _onnx_model_urls(str(SWISS_RECOGNIZER), str(SWISS_RECOGNIZER))[-1].rpartition("/")[2]
+        path = cache_dir() / "onnxtr" / "models" / name
+        if not path.exists():
+            raise FileNotFoundError(f"The page orientation model {name} is missing: finish the setup first")
+        config = EngineConfig(providers=CPU_ONLY, session_options=ort.SessionOptions())
+        model = getattr(classification, ORIENTATION_ARCH)(str(path), engine_cfg=config)
+        self._predictor = page_orientation_predictor(model, engine_cfg=config)
+
+    def _ask(self, image) -> tuple[int, float]:
+        import numpy as np
+
+        if self._predictor is None:
+            self._load()
+        _, classes, confidences = self._predictor([np.asarray(image.convert("RGB"))])
+        return int(classes[0]), float(confidences[0])
+
+    def __call__(self, image) -> tuple[int, float]:
+        """(angle, confidence): the content is turned clockwise by ``angle``, one of 0, 90, 180, -90.
+
+        The model recognizes some positions much better than others (a page at -90 degrees worst).
+        So when it is unsure, it sees the page in the other three positions too, which costs
+        milliseconds, and the four answers vote. At least three that agree count with their mean
+        confidence; a page without text, where they disagree, stays below the threshold."""
+        angle, confidence = self._ask(image)
+        if confidence >= MIN_ORIENTATION_CONFIDENCE:
+            return angle, confidence
+        votes = {angle: [confidence]}
+        for turn in (90, 180, -90):
+            seen, sure = self._ask(image.rotate(turn, expand=True))
+            implied = (seen + turn + 90) % 360 - 90  # turned by ``turn``, the page shows ``seen``
+            votes.setdefault(implied, []).append(sure)
+        best = max(votes, key=lambda a: sum(votes[a]))
+        return best, sum(votes[best]) / max(len(votes[best]), 3)
+
+
 class OnnxWordReader:
     """docTR's models through OnnxTR and ONNX Runtime: the same words and boxes as
     DoctrWordReader, without PyTorch (what the desktop app ships).
@@ -293,7 +356,7 @@ class OnnxWordReader:
         self.providers: list[str] = []
 
     def _build(self, providers: list[str]):
-        import onnxruntime as ort
+        ort = onnxruntime()
         from onnxtr import models
         from onnxtr.models import EngineConfig, ocr_predictor
 
